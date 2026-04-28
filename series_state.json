@@ -1,0 +1,12 @@
+{
+    "series_id": "",
+    "current_episode_target": 1,
+    "style_token": "Manhwa panel, cel shaded, bold outlines, webtoon style, --ar 9:16",
+    "global_arc": "",
+    "character_registry": {
+        "Arthur": "tall, dark hair, glowing red eyes, wearing dark armor"
+    },
+    "completed_episodes": [
+        "test_series_1"
+    ]
+}
