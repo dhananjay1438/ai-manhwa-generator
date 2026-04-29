@@ -4,12 +4,13 @@ import ffmpeg
 from typing import List
 
 class FFmpegAssembler:
-    def __init__(self, episode_id: str, assets_dir: str):
+    def __init__(self, episode_id: str, assets_dir: str, enable_subtitles: bool = True):
         self.episode_id = episode_id
         self.assets_dir = assets_dir
         self.images_dir = os.path.join(assets_dir, "images")
         self.audio_path = os.path.join(assets_dir, "audio.mp3")
         self.subtitle_path = os.path.join(assets_dir, "subtitles.ass")
+        self.enable_subtitles = enable_subtitles
         self.output_path = f"ep_{episode_id}_final.mp4"
 
     def _get_audio_duration(self) -> float:
@@ -62,12 +63,11 @@ class FFmpegAssembler:
             video_streams.append(stream)
 
         # 3. Concatenate all processed image streams
-        concatenated_video = ffmpeg.concat(*video_streams, v=1, a=0)
+        video = ffmpeg.concat(*video_streams, v=1, a=0)
 
-        # 4. Add ASS subtitles
-        # Note: the ass filter requires the path to be formatted nicely, especially on Windows,
-        # but locally on Linux/Mac relative paths usually work.
-        subbed_video = concatenated_video.filter('ass', self.subtitle_path)
+        # 4. Add ASS subtitles conditionally
+        if self.enable_subtitles and os.path.exists(self.subtitle_path):
+            video = video.filter('ass', self.subtitle_path)
 
         # 5. Bring in audio stream
         audio_stream = ffmpeg.input(self.audio_path)
@@ -75,7 +75,7 @@ class FFmpegAssembler:
         # 6. Output
         try:
             out = ffmpeg.output(
-                subbed_video,
+                video,
                 audio_stream,
                 self.output_path,
                 vcodec='libx264',

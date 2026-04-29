@@ -15,7 +15,12 @@ app = FastAPI(title="V2 Static-Episodic Manhwa Engine")
 # Dependency initialization
 state_manager = StateManager()
 prompt_compiler = PromptCompiler(state_manager)
-asset_factory = AssetFactory(settings.runware_api_key, settings.elevenlabs_api_key)
+asset_factory = AssetFactory(
+    runware_api_key=settings.runware_api_key,
+    google_api_key=settings.google_api_key,
+    google_tts_voice=settings.google_tts_voice,
+    enable_whisper=settings.enable_whisper
+)
 
 class GenerationRequest(BaseModel):
     series_id: str
@@ -43,16 +48,23 @@ async def run_pipeline(series_id: str, script_data: Dict[str, Any]):
         transcription_path = asset_paths["transcription_path"]
 
         # Module 3: Subtitle Engineering
-        print("Generating ASS subtitles...")
-        sub_gen = SubtitleGenerator(
-            transcription_path=transcription_path,
-            output_ass_path=os.path.join(assets_dir, "subtitles.ass")
-        )
-        sub_gen.generate()
+        if settings.enable_whisper and transcription_path:
+            print("Generating ASS subtitles...")
+            sub_gen = SubtitleGenerator(
+                transcription_path=transcription_path,
+                output_ass_path=os.path.join(assets_dir, "subtitles.ass")
+            )
+            sub_gen.generate()
+        else:
+            print("Skipping subtitles (Whisper disabled)...")
 
         # Module 4: Assembly
         print("Assembling video...")
-        assembler = FFmpegAssembler(episode_id=episode_id, assets_dir=assets_dir)
+        assembler = FFmpegAssembler(
+            episode_id=episode_id,
+            assets_dir=assets_dir,
+            enable_subtitles=settings.enable_whisper
+        )
         final_video = assembler.assemble()
 
         print(f"Pipeline complete! Output: {final_video}")

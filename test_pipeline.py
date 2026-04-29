@@ -3,7 +3,10 @@ import os
 import shutil
 from main import run_pipeline
 from state_manager import StateManager
+from config import settings
 from PIL import Image
+import subprocess
+from generators import RunwareImageGenerator, VertexAITTSGenerator
 
 async def mock_test():
     print("Setting up test environment...")
@@ -37,50 +40,51 @@ async def mock_test():
     series_id = "test_series"
     episode_id = f"{series_id}_1"
 
-    # Clean up previous test runs if they exist
-    assets_dir = f"./assets/ep_{episode_id}"
-    if os.path.exists(assets_dir):
-        shutil.rmtree(assets_dir)
+    def cleanup():
+        assets_dir = f"./assets/ep_{episode_id}"
+        if os.path.exists(assets_dir):
+            shutil.rmtree(assets_dir)
 
-    final_video = f"ep_{episode_id}_final.mp4"
-    if os.path.exists(final_video):
-        os.remove(final_video)
+        final_video = f"ep_{episode_id}_final.mp4"
+        if os.path.exists(final_video):
+            os.remove(final_video)
 
-    # We need to preemptively create some "mock" actual image files because the
-    # current mocked AssetFactory just writes "mock_image_data" string,
-    # but FFmpeg requires actual valid images to build the video.
+    # Let's override the Generator methods temporarily for the test so it writes real dummy files
+    original_generate_image = RunwareImageGenerator.generate_image
 
-    # Let's override the AssetFactory mock temporarily for the test so it writes real dummy PNGs
-    from asset_factory import AssetFactory
-
-    original_generate_image = AssetFactory._generate_image
-
-    async def mock_generate_image(self, session, prompt, output_path):
+    async def mock_generate_image(self, prompt, output_path):
         # Create a real, blank 512x896 image
         img = Image.new('RGB', (512, 896), color = 'red')
         img.save(output_path)
         return output_path
 
-    AssetFactory._generate_image = mock_generate_image
+    RunwareImageGenerator.generate_image = mock_generate_image
 
     # For audio, FFmpeg needs a real audio file. Let's create a silent mp3 using ffmpeg.
-    original_generate_audio = AssetFactory._generate_audio
+    original_generate_audio = VertexAITTSGenerator.generate_audio
 
-    async def mock_generate_audio(self, session, text, output_path):
-        import subprocess
+    async def mock_generate_audio(self, text, output_path):
         subprocess.run(['ffmpeg', '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=mono', '-t', '3', '-q:a', '9', '-acodec', 'libmp3lame', output_path, '-y'],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return output_path
 
-    AssetFactory._generate_audio = mock_generate_audio
+    VertexAITTSGenerator.generate_audio = mock_generate_audio
 
-    # Run the pipeline
-    print("Running pipeline...")
+    # Test WITH Whisper
+    print("\n--- Running pipeline (Whisper Enabled) ---")
+    settings.enable_whisper = True
+    cleanup()
     await run_pipeline(series_id, mock_script)
+    assert os.path.exists(f"ep_{episode_id}_final.mp4"), "Final video not found for Whisper test."
 
-    # Verify outputs
-    assert os.path.exists(final_video), f"Final video not found: {final_video}"
-    print(f"Test passed! Video generated successfully at {final_video}")
+    # Test WITHOUT Whisper
+    print("\n--- Running pipeline (Whisper Disabled) ---")
+    settings.enable_whisper = False
+    cleanup()
+    await run_pipeline(series_id, mock_script)
+    assert os.path.exists(f"ep_{episode_id}_final.mp4"), "Final video not found for Non-Whisper test."
+
+    print("\nAll tests passed successfully!")
 
 if __name__ == "__main__":
     asyncio.run(mock_test())
