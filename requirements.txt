@@ -6,3 +6,4 @@ whisper-timestamped
 aiohttp
 tenacity
 aiofiles
+pydantic-settings

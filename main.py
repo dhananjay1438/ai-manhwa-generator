@@ -8,17 +8,14 @@ from compiler import PromptCompiler
 from asset_factory import AssetFactory
 from subtitle_generator import SubtitleGenerator
 from assembler import FFmpegAssembler
+from config import settings
 
 app = FastAPI(title="V2 Static-Episodic Manhwa Engine")
 
 # Dependency initialization
 state_manager = StateManager()
 prompt_compiler = PromptCompiler(state_manager)
-
-# Use mocked keys or read from env
-RUNWARE_KEY = os.environ.get("RUNWARE_API_KEY", "MOCK_KEY")
-ELEVENLABS_KEY = os.environ.get("ELEVENLABS_API_KEY", "MOCK_KEY")
-asset_factory = AssetFactory(RUNWARE_KEY, ELEVENLABS_KEY)
+asset_factory = AssetFactory(settings.runware_api_key, settings.elevenlabs_api_key)
 
 class GenerationRequest(BaseModel):
     series_id: str
