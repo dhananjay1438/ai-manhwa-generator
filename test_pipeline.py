@@ -62,7 +62,7 @@ async def mock_test():
         img.save(output_path)
         return output_path
 
-    RunwareImageGenerator.generate_image = mock_generate_image
+    # RunwareImageGenerator.generate_image = mock_generate_image
 
     # For audio, FFmpeg needs a real audio file.
     async def mock_generate_audio(_self, _text, output_path):
@@ -88,7 +88,7 @@ async def mock_test():
         )
         return output_path
 
-    VertexAITTSGenerator.generate_audio = mock_generate_audio
+    # VertexAITTSGenerator.generate_audio = mock_generate_audio
 
     # Test WITH Whisper
     logger.info("--- Running pipeline (Whisper Enabled) ---")

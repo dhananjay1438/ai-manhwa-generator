@@ -12,15 +12,24 @@ from logger import logger
 from state_manager import StateManager
 from subtitle_generator import SubtitleGenerator
 
+from core.llm.gemini import Gemini
+from core.image.runware import RunwareImageGenerator
+from core.audio.edge_tts import EdgeTTSProvider
+
 app = FastAPI(title="V2 Static-Episodic Manhwa Engine")
 
 # Dependency initialization
 state_manager = StateManager()
 prompt_compiler = PromptCompiler(state_manager)
+
+# Core providers
+llm = Gemini()
+image_generator = RunwareImageGenerator(api_key=settings.runware_api_key)
+audio_generator = EdgeTTSProvider()
+
 asset_factory = AssetFactory(
-    runware_api_key=settings.runware_api_key,
-    google_api_key=settings.google_api_key,
-    google_tts_voice=settings.google_tts_voice,
+    image_generator=image_generator,
+    audio_generator=audio_generator,
     enable_whisper=settings.enable_whisper,
 )
 
@@ -30,13 +39,19 @@ class GenerationRequest(BaseModel):
     script: Dict[str, Any]  # Accepts the EpisodeScript dict
 
 
-async def run_pipeline(series_id: str, script_data: Dict[str, Any]):
+async def run_pipeline(series_id: str, script_data: Dict[str, Any], output_dir: Path = None):
     try:
         episode_number = script_data.get("episode_number", 1)
         episode_id = f"{series_id}_{episode_number}"
 
         # Ensure base directories exist
-        assets_dir = Path("./assets") / f"ep_{episode_id}"
+        if output_dir:
+            assets_dir = output_dir / f"ep_{episode_id}_assets"
+            final_video_path = output_dir / f"ep_{episode_id}_final.mp4"
+        else:
+            assets_dir = Path("./assets") / f"ep_{episode_id}"
+            final_video_path = Path(f"ep_{episode_id}_final.mp4")
+            
         assets_dir.mkdir(parents=True, exist_ok=True)
 
         logger.info("Starting pipeline for episode %s", episode_id)
@@ -48,7 +63,7 @@ async def run_pipeline(series_id: str, script_data: Dict[str, Any]):
 
         # Module 2: Generate Assets (Async)
         logger.info("Generating assets...")
-        asset_paths = await asset_factory.generate_assets(episode_id, compiled_prompts, script_text)
+        asset_paths = await asset_factory.generate_assets(episode_id, compiled_prompts, script_text, base_dir=assets_dir)
         transcription_path = asset_paths["transcription_path"]
 
         # Module 3: Subtitle Engineering
@@ -68,6 +83,7 @@ async def run_pipeline(series_id: str, script_data: Dict[str, Any]):
             episode_id=episode_id,
             assets_dir=str(assets_dir),
             enable_subtitles=settings.enable_whisper,
+            output_path=str(final_video_path)
         )
         final_video = assembler.assemble()
 

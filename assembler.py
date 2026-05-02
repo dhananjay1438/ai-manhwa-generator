@@ -1,88 +1,87 @@
 from pathlib import Path
-
-import ffmpeg
-
+from moviepy import ImageClip, AudioFileClip, concatenate_videoclips
+import moviepy.video.fx as vfx
 from logger import logger
 
 
 class FFmpegAssembler:
-    def __init__(self, episode_id: str, assets_dir: str, enable_subtitles: bool = True):
+    def __init__(self, episode_id: str, assets_dir: str, enable_subtitles: bool = True, output_path: str = None):
         self.episode_id = episode_id
         self.assets_dir = Path(assets_dir)
         self.images_dir = self.assets_dir / "images"
         self.audio_path = self.assets_dir / "audio.mp3"
         self.subtitle_path = self.assets_dir / "subtitles.ass"
         self.enable_subtitles = enable_subtitles
-        self.output_path = Path(f"ep_{episode_id}_final.mp4")
-
-    def _get_audio_duration(self) -> float:
-        """Probe the audio file to get its duration."""
-        try:
-            probe = ffmpeg.probe(str(self.audio_path))
-            duration = float(probe["format"]["duration"])
-            return duration
-        except ffmpeg.Error as e:
-            logger.error("Error probing audio: %s", e.stderr.decode())
-            # Fallback duration if probe fails
-            return 10.0
+        if output_path:
+            self.output_path = Path(output_path)
+        else:
+            self.output_path = Path(f"ep_{episode_id}_final.mp4")
 
     def assemble(self) -> str:
-        """Assembles the final video using ffmpeg-python."""
+        """Assembles the final video using MoviePy with a progress bar."""
         if self.output_path.exists():
             logger.info("Skipping assembly, %s already exists.", self.output_path)
             return str(self.output_path)
 
-        # 1. Calculate image pacing
-        audio_duration = self._get_audio_duration()
+        # 1. Load audio and images
+        audio_clip = AudioFileClip(str(self.audio_path))
         image_files = sorted(self.images_dir.glob("*.png"))
         num_images = len(image_files)
 
         if num_images == 0:
             raise ValueError(f"No images found in {self.images_dir}")
 
-        time_per_image = audio_duration / num_images
-        fps = 30  # standard output fps
-        frames_per_image = int(time_per_image * fps)
+        duration_per_image = audio_clip.duration / num_images
+        
+        clips = []
+        for img_path in image_files:
+            # Load image and set duration
+            img_clip = ImageClip(str(img_path)).with_duration(duration_per_image)
+            
+            # Apply subtle zoom effect (Ken Burns)
+            # Zoom from 1.0 to 1.05
+            w, h = img_clip.size
+            img_clip = img_clip.with_effects([
+                vfx.Resize(lambda t: 1 + 0.05 * (t / duration_per_image)),
+                vfx.Crop(x_center=w/2, y_center=h/2, width=w, height=h)
+            ])
+            
+            clips.append(img_clip)
 
-        # 2. Build input streams for each image with zoompan
-        video_streams = []
-        for img in image_files:
-            stream = ffmpeg.input(str(img))
-            stream = stream.filter(
-                "zoompan",
-                z="min(zoom+0.05/%d,1.05)" % frames_per_image,
-                d=frames_per_image,
-                s="1080x1920",  # ensuring consistent output size
-                fps=fps,
-            )
-            video_streams.append(stream)
+        # 2. Concatenate and attach audio
+        video = concatenate_videoclips(clips, method="compose")
+        video = video.with_audio(audio_clip)
 
-        # 3. Concatenate all processed image streams
-        video = ffmpeg.concat(*video_streams, v=1, a=0)
-
-        # 4. Add ASS subtitles conditionally
+        # 3. Handle subtitles (MoviePy 2.x style or via ffmpeg_params)
+        # For ASS subtitles, it's often easiest to pass the filter to ffmpeg directly
+        ffmpeg_params = []
         if self.enable_subtitles and self.subtitle_path.exists():
-            # For the 'ass' filter, the filename sometimes needs escaping or explicit naming
-            video = video.filter("ass", filename=str(self.subtitle_path))
+            # moviepy allows passing extra ffmpeg arguments
+            # Note: The 'ass' filter in ffmpeg needs the path
+            sub_path = str(self.subtitle_path).replace("\\", "/").replace(":", "\\:")
+            ffmpeg_params = ["-vf", f"ass={sub_path}"]
 
-        # 5. Bring in audio stream
-        audio_stream = ffmpeg.input(str(self.audio_path))
-
-        # 6. Output
+        # 4. Write output with progress bar
         try:
-            out = ffmpeg.output(
-                video,
-                audio_stream,
+            logger.info("Starting video assembly for %s", self.episode_id)
+            video.write_videofile(
                 str(self.output_path),
-                vcodec="libx264",
-                acodec="aac",
-                pix_fmt="yuv420p",
-                shortest=None,
+                fps=30,
+                codec="libx264",
+                audio_codec="aac",
+                preset="ultrafast",
+                logger="bar",
+                ffmpeg_params=ffmpeg_params
             )
-            out.run(overwrite_output=True, quiet=True)
             logger.info("Successfully created %s", self.output_path)
-        except ffmpeg.Error as e:
-            logger.error("FFmpeg error: %s", e.stderr.decode())
+        except Exception as e:
+            logger.error("Error during video assembly: %s", e)
             raise
+
+        # Close clips to free resources
+        audio_clip.close()
+        video.close()
+        for clip in clips:
+            clip.close()
 
         return str(self.output_path)
