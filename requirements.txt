@@ -1,9 +1,0 @@
-fastapi
-uvicorn
-pydantic
-ffmpeg-python
-whisper-timestamped
-aiohttp
-tenacity
-aiofiles
-pydantic-settings

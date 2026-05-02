@@ -1,7 +1,9 @@
 import re
-from typing import List, Dict, Any
-from models import EpisodeScript, VisualPrompt
+from typing import Any, Dict, List
+
+from models import EpisodeScript
 from state_manager import StateManager
+
 
 class PromptCompiler:
     def __init__(self, state_manager: StateManager):
@@ -30,15 +32,12 @@ class PromptCompiler:
                 if char_desc:
                     # Replace whole word matches of the character name with their description
                     # using regex to ensure we don't partially replace words
-                    pattern = re.compile(rf'\b{re.escape(char_name)}\b', re.IGNORECASE)
+                    pattern = re.compile(rf"\b{re.escape(char_name)}\b", re.IGNORECASE)
                     action_desc = pattern.sub(f"{char_name} ({char_desc})", action_desc)
 
             # Step 3: Style Injection
             final_prompt = f"{style_token} {action_desc}".strip()
 
-            compiled_prompts.append({
-                "panel_id": panel.panel_id,
-                "prompt": final_prompt
-            })
+            compiled_prompts.append({"panel_id": panel.panel_id, "prompt": final_prompt})
 
         return compiled_prompts
