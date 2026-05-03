@@ -68,8 +68,101 @@ uv run python run_live.py --plot "A poor student discovered he's the heir to a t
 - `--series`: A unique ID for the series (used for folder naming).
 - `--episodes`: Number of episodes to generate in this run.
 - `--start`: Which episode number to start from (useful for resuming).
+- `--publish`: After rendering, upload the final episode video to Google Drive and YouTube.
 
-### 2. Running the API Server
+### 2. Daily End-to-End Pipeline
+
+Create an OAuth desktop client in Google Cloud with the Drive API and YouTube Data API enabled, then place the downloaded secret at:
+
+```text
+client-secret.json
+```
+
+Drive and YouTube authenticate separately so you can choose your personal account for Drive and your brand/channel account for YouTube. By default both flows reuse `client-secret.json`, but they write separate tokens:
+
+```text
+drive-token.json
+youtube-token.json
+```
+
+The first publishing run opens one browser consent flow for Drive and one for YouTube. Later runs refresh/reuse the matching token automatically.
+
+Run the one-time auth setup from a shell:
+
+```bash
+uv run python daily_episode.py --setup-auth
+```
+
+Test email delivery:
+
+```bash
+uv run python daily_episode.py --test-email
+```
+
+Normal daily runs are non-interactive. If either token is missing or invalid, the run fails fast and sends a Resend email notification.
+
+Recommended `.env` values:
+
+```bash
+GOOGLE_DRIVE_CLIENT_SECRET_PATH=client-secret.json
+GOOGLE_DRIVE_TOKEN_PATH=drive-token.json
+GOOGLE_DRIVE_FOLDER_ID=your_drive_folder_id
+GOOGLE_DRIVE_FOLDER_PATH=AI Manhwa Episodes
+YOUTUBE_CLIENT_SECRET_PATH=client-secret.json
+YOUTUBE_TOKEN_PATH=youtube-token.json
+YOUTUBE_PRIVACY_STATUS=private
+YOUTUBE_CATEGORY_ID=24
+YOUTUBE_MADE_FOR_KIDS=false
+RESEND_API_KEY=your_resend_api_key
+NOTIFICATION_EMAIL_FROM=ai-manhwa-creator@resend.com
+NOTIFICATION_EMAIL_TO=dhananjaypanage11@gmail.com
+DAILY_SERIES_ID=heir_reveal
+DAILY_EPISODE_PLOT="A poor student discovered he's the heir to a trillion-dollar empire."
+```
+
+Use `GOOGLE_DRIVE_FOLDER_ID` when you know the exact folder ID. If it is blank, `GOOGLE_DRIVE_FOLDER_PATH` is used and missing folders are created.
+
+Generate, publish to Drive/YouTube, update daily state, and email success/failure:
+
+```bash
+uv run python daily_episode.py
+```
+
+`daily_episode.py` is designed for a systemd timer. It stores progress in `daily_episode_state.json`, generates exactly the next episode, and advances the state only after the run finishes.
+
+Example service command:
+
+```ini
+ExecStart=/usr/bin/env uv run python /path/to/ai-manhwa-generator/daily_episode.py
+WorkingDirectory=/path/to/ai-manhwa-generator
+```
+
+Use `--skip-publish` only for a dry generation run.
+
+### 3. Schedule an Existing Series
+
+Use this for videos already rendered under `outputs/<series_timestamp>/`. It generates YouTube titles, descriptions, and tags from the saved story artifacts, then uploads each episode as a private scheduled video one day apart at 9 PM IST.
+
+```bash
+uv run python schedule_existing_series.py outputs/billionaire_revenge_20260503_000128
+```
+
+Set the first scheduled date explicitly:
+
+```bash
+uv run python schedule_existing_series.py outputs/billionaire_revenge_20260503_000128 --first-date 2026-05-04
+```
+
+The script writes:
+
+```text
+episode_01_youtube_metadata.json
+youtube_schedule_manifest.json
+```
+
+Rerunning the script skips episodes already present in the schedule manifest.
+
+### 4. Running the API Server
 For remote triggering of episodes:
 ```bash
 uv run start
