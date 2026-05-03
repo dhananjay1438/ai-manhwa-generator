@@ -14,7 +14,7 @@ from googleapiclient.http import MediaFileUpload
 from config import settings
 from logger import logger
 
-DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.file"]
+DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
 YOUTUBE_SCOPES = [
     "https://www.googleapis.com/auth/youtube.upload",
     "https://www.googleapis.com/auth/youtube.force-ssl",
@@ -134,22 +134,40 @@ class GooglePublisher:
                 "Starting %s OAuth flow. Choose the correct Google account/channel.",
                 service_name,
             )
-            flow = InstalledAppFlow.from_client_secrets_file(str(client_secret_path), scopes)
+            flow = InstalledAppFlow.from_client_secrets_file(
+                str(client_secret_path), scopes
+            )
             credentials = flow.run_local_server(port=0)
 
         token_path.write_text(credentials.to_json(), encoding="utf-8")
         return credentials
 
-    def _resolve_drive_parent_id(self) -> str | None:
-        if settings.google_drive_folder_id:
+    def _resolve_drive_parent_id(self, folder_path: str | None = None) -> str | None:
+        if settings.google_drive_folder_id and not folder_path:
             return settings.google_drive_folder_id
 
-        drive_path = settings.google_drive_folder_path.strip("/")
+        drive_path = (folder_path or settings.google_drive_folder_path).strip("/")
         if not drive_path:
             return None
 
+        parts = [part.strip() for part in drive_path.split("/") if part.strip()]
+        if not parts:
+            return None
+
+        # 1. Check if the first part is a Shared Drive
         parent_id = "root"
-        for folder_name in [part.strip() for part in drive_path.split("/") if part.strip()]:
+        try:
+            drives_resp = self.drive.drives().list().execute()
+            for d in drives_resp.get("drives", []):
+                if d["name"].lower() == parts[0].lower():
+                    parent_id = d["id"]
+                    parts = parts[1:]
+                    break
+        except Exception as e:
+            logger.warning(f"Could not list shared drives: {e}. Defaulting to My Drive.")
+
+        # 2. Traverse the remaining path
+        for folder_name in parts:
             parent_id = self._get_or_create_drive_folder(folder_name, parent_id)
         return parent_id
 
@@ -195,7 +213,9 @@ class GooglePublisher:
         )
         return folder["id"]
 
-    def upload_to_drive(self, video_path: Path, title: str) -> dict:
+    def upload_to_drive(
+        self, video_path: Path, title: str, folder_path: str | None = None
+    ) -> dict:
         if not self.drive:
             raise RuntimeError("Google Drive client is not initialized.")
 
@@ -204,7 +224,7 @@ class GooglePublisher:
             "description": title,
         }
 
-        parent_id = self._resolve_drive_parent_id()
+        parent_id = self._resolve_drive_parent_id(folder_path=folder_path)
         if parent_id:
             metadata["parents"] = [parent_id]
 
@@ -252,7 +272,9 @@ class GooglePublisher:
 
         media = MediaFileUpload(str(video_path), mimetype="video/mp4", resumable=True)
         if publish_at:
-            logger.info("Uploading %s to YouTube scheduled for %s...", video_path, publish_at)
+            logger.info(
+                "Uploading %s to YouTube scheduled for %s...", video_path, publish_at
+            )
         else:
             logger.info("Uploading %s to YouTube...", video_path)
         return (
@@ -304,17 +326,22 @@ class GooglePublisher:
         tags: list[str] | None = None,
         publish_at: datetime | None = None,
         append_episode_suffix: bool = True,
+        folder_path: str | None = None,
     ) -> PublishResult:
         video_path = Path(video_path)
         if not video_path.exists():
             raise FileNotFoundError(f"Cannot publish missing video: {video_path}")
 
         upload_title = (
-            f"{title} | {series_id} Episode {episode_number}" if append_episode_suffix else title
+            f"{title} | {series_id} Episode {episode_number}"
+            if append_episode_suffix
+            else title
         )
         upload_tags = tags or ["manhwa", "webtoon", "recap", series_id]
 
-        drive_file = self.upload_to_drive(video_path, upload_title)
+        drive_file = self.upload_to_drive(
+            video_path, upload_title, folder_path=folder_path
+        )
         youtube_video = self.upload_to_youtube(
             video_path, upload_title, description, upload_tags, publish_at=publish_at
         )

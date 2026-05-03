@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     google_drive_client_secret_path: str = "client-secret.json"
     google_drive_token_path: str = "drive-token.json"
     google_drive_folder_id: str | None = None
-    google_drive_folder_path: str = ""
+    google_drive_folder_path: str = "business/panage-ventures/youtube-channels/manhwa-reloaded/videos"
     youtube_client_secret_path: str = "client-secret.json"
     youtube_token_path: str = "youtube-token.json"
     youtube_privacy_status: str = "private"
